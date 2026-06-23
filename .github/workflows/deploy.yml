@@ -15,12 +15,25 @@ jobs:
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USER }}
           key: ${{ secrets.SSH_KEY }}
+          port: 22
+          script_stop: true
           script: |
+            set -e
+
             cd ~/api-escalada
-            git pull origin main
 
-            docker stop api-escalada || true
-            docker rm api-escalada || true
+            git fetch origin main
+            git reset --hard origin/main
 
-            docker build -t api-escalada .
-            docker run -d --name api-escalada -p 8080:8080 api-escalada
+            docker stop api-escalada 2>/dev/null || true
+            docker rm api-escalada 2>/dev/null || true
+
+            docker build --no-cache -t api-escalada:latest .
+
+            docker run -d \
+              --name api-escalada \
+              --restart unless-stopped \
+              -p 8080:8080 \
+              api-escalada:latest
+
+            docker image prune -f
