@@ -19,6 +19,7 @@ type userInfo struct {
 	ID       int    `json:"id"`
 	Username string `json:"username"`
 	Nombre   string `json:"nombre"`
+	Email    string `json:"email"`
 }
 
 type loginResponse struct {
@@ -39,9 +40,9 @@ func Login(w http.ResponseWriter, r *http.Request) {
 	}
 	var user userInfo
 	err := db.DB.QueryRow(
-		"SELECT id, username, nombre FROM usuarios WHERE username=$1 AND password=$2",
+		"SELECT id, username, nombre, COALESCE(email, '') FROM usuarios WHERE username=$1 AND password=$2",
 		req.Username, req.Password,
-	).Scan(&user.ID, &user.Username, &user.Nombre)
+	).Scan(&user.ID, &user.Username, &user.Nombre, &user.Email)
 	if err != nil {
 		http.Error(w, `{"error":"credenciales invalidas"}`, http.StatusUnauthorized)
 		return

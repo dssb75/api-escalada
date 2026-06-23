@@ -2,12 +2,18 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
+	"html"
+	"log"
 	"net/http"
+	"net/mail"
 	"strconv"
+	"strings"
 	"time"
 
 	"api-escalada/db"
 	"api-escalada/middleware"
+	"api-escalada/modules/mailer"
 )
 
 type ReservaEquipo struct {
@@ -57,9 +63,14 @@ func ReservasEquipo(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			EquipoID int    `json:"equipo_id"`
 			Fecha    string `json:"fecha"`
+			Email    string `json:"email"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+			return
+		}
+		if _, err := mail.ParseAddress(strings.TrimSpace(req.Email)); err != nil {
+			http.Error(w, `{"error":"correo electronico invalido"}`, http.StatusBadRequest)
 			return
 		}
 		var id int
@@ -71,8 +82,12 @@ func ReservasEquipo(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"error creating reserva"}`, http.StatusInternalServerError)
 			return
 		}
+		emailSent := sendReservaEquipoEmail(userID, id, req.EquipoID, req.Fecha, strings.TrimSpace(req.Email))
+		if emailSent != nil {
+			log.Printf("warning: equipment reservation email not sent: %v", emailSent)
+		}
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]int{"id": id})
+		json.NewEncoder(w).Encode(map[string]any{"id": id, "email_sent": emailSent == nil})
 
 	case http.MethodDelete:
 		idStr := r.URL.Query().Get("id")
@@ -146,9 +161,14 @@ func ReservasHorario(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Fecha string `json:"fecha"`
 			Hora  string `json:"hora"`
+			Email string `json:"email"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+			return
+		}
+		if _, err := mail.ParseAddress(strings.TrimSpace(req.Email)); err != nil {
+			http.Error(w, `{"error":"correo electronico invalido"}`, http.StatusBadRequest)
 			return
 		}
 		isBusiness, err := isBusinessDay(req.Fecha)
@@ -182,8 +202,12 @@ func ReservasHorario(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"error creating reserva"}`, http.StatusInternalServerError)
 			return
 		}
+		emailSent := sendReservaHorarioEmail(userID, id, req.Fecha, req.Hora, strings.TrimSpace(req.Email))
+		if emailSent != nil {
+			log.Printf("warning: schedule reservation email not sent: %v", emailSent)
+		}
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]int{"id": id})
+		json.NewEncoder(w).Encode(map[string]any{"id": id, "email_sent": emailSent == nil})
 
 	case http.MethodDelete:
 		idStr := r.URL.Query().Get("id")
@@ -225,4 +249,80 @@ func isValidHora(hora string) bool {
 	}
 	minutes := t.Hour()*60 + t.Minute()
 	return t.Minute() == 0 && minutes >= 8*60 && minutes <= 22*60
+}
+
+type userContact struct {
+	Nombre string
+	Email  string
+}
+
+func getUserContact(userID int) (userContact, error) {
+	var contact userContact
+	err := db.DB.QueryRow(
+		`SELECT nombre, COALESCE(email, '') FROM usuarios WHERE id = $1`,
+		userID,
+	).Scan(&contact.Nombre, &contact.Email)
+	if err != nil {
+		return userContact{}, err
+	}
+	if contact.Email == "" {
+		return userContact{}, fmt.Errorf("usuario sin correo registrado")
+	}
+	return contact, nil
+}
+
+func sendReservaEquipoEmail(userID, reservaID, equipoID int, fecha, recipientEmail string) error {
+	contact, err := getUserContact(userID)
+	if err != nil {
+		return err
+	}
+	var equipoNombre string
+	if err := db.DB.QueryRow(`SELECT nombre FROM equipos WHERE id = $1`, equipoID).Scan(&equipoNombre); err != nil {
+		return err
+	}
+	subject := fmt.Sprintf("Confirmacion de reserva de equipo #%d", reservaID)
+	body := buildReservationEmailBody("Reserva de equipo confirmada", map[string]string{
+		"Reserva":   fmt.Sprintf("#%d", reservaID),
+		"Usuario":   contact.Nombre,
+		"Correo":    contact.Email,
+		"Equipo":    equipoNombre,
+		"Fecha":     fecha,
+		"Estado":    "activa",
+		"Notificar": recipientEmail,
+	})
+	return mailer.SendHTML(recipientEmail, subject, body)
+}
+
+func sendReservaHorarioEmail(userID, reservaID int, fecha, hora, recipientEmail string) error {
+	contact, err := getUserContact(userID)
+	if err != nil {
+		return err
+	}
+	subject := fmt.Sprintf("Confirmacion de reserva de horario #%d", reservaID)
+	body := buildReservationEmailBody("Reserva de horario confirmada", map[string]string{
+		"Reserva":   fmt.Sprintf("#%d", reservaID),
+		"Usuario":   contact.Nombre,
+		"Correo":    contact.Email,
+		"Fecha":     fecha,
+		"Hora":      hora,
+		"Estado":    "activa",
+		"Notificar": recipientEmail,
+	})
+	return mailer.SendHTML(recipientEmail, subject, body)
+}
+
+func buildReservationEmailBody(title string, details map[string]string) string {
+	var b strings.Builder
+	b.WriteString("<!doctype html><html><body style='font-family:Arial,sans-serif;background:#f6f8fb;color:#111827;padding:24px'>")
+	b.WriteString("<div style='max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;padding:24px'>")
+	b.WriteString("<h2 style='margin:0 0 12px;font-size:20px;color:#0f172a'>" + html.EscapeString(title) + "</h2>")
+	b.WriteString("<p style='margin:0 0 16px;color:#334155'>Tu reserva quedo registrada con esta informacion:</p>")
+	b.WriteString("<table style='width:100%;border-collapse:collapse'>")
+	for label, value := range details {
+		b.WriteString("<tr><td style='padding:8px 0;border-bottom:1px solid #e5e7eb;font-weight:700;color:#0f172a'>" + html.EscapeString(label) + "</td><td style='padding:8px 0;border-bottom:1px solid #e5e7eb;color:#334155'>" + html.EscapeString(value) + "</td></tr>")
+	}
+	b.WriteString("</table>")
+	b.WriteString("<p style='margin:16px 0 0;color:#64748b;font-size:12px'>EscaLab</p>")
+	b.WriteString("</div></body></html>")
+	return b.String()
 }

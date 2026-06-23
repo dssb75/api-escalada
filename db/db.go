@@ -29,6 +29,7 @@ func migrate() {
 			username VARCHAR(50) UNIQUE NOT NULL,
 			password VARCHAR(255) NOT NULL,
 			nombre VARCHAR(100) NOT NULL,
+			email VARCHAR(150),
 			created_at TIMESTAMP DEFAULT NOW()
 		)`,
 		`CREATE TABLE IF NOT EXISTS equipos (
@@ -54,11 +55,19 @@ func migrate() {
 			estado VARCHAR(20) DEFAULT 'activa',
 			created_at TIMESTAMP DEFAULT NOW()
 		)`,
+		`CREATE TABLE IF NOT EXISTS auth_tokens (
+			token VARCHAR(128) PRIMARY KEY,
+			usuario_id INTEGER REFERENCES usuarios(id) ON DELETE CASCADE,
+			created_at TIMESTAMP DEFAULT NOW()
+		)`,
 	}
 	for _, s := range stmts {
 		if _, err := DB.Exec(s); err != nil {
 			log.Printf("Migration warning: %v", err)
 		}
+	}
+	if _, err := DB.Exec(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS email VARCHAR(150)`); err != nil {
+		log.Printf("Migration warning: %v", err)
 	}
 	seedData()
 	log.Println("Database ready")
@@ -68,10 +77,12 @@ func seedData() {
 	var count int
 	DB.QueryRow("SELECT COUNT(*) FROM usuarios").Scan(&count)
 	if count == 0 {
-		DB.Exec(`INSERT INTO usuarios (username, password, nombre) VALUES ('admin', 'admin123', 'Administrador')`)
-		DB.Exec(`INSERT INTO usuarios (username, password, nombre) VALUES ('escalador', 'escalar123', 'Carlos Rueda')`)
+		DB.Exec(`INSERT INTO usuarios (username, password, nombre, email) VALUES ('admin', 'admin123', 'Administrador', 'admin@escalada.local')`)
+		DB.Exec(`INSERT INTO usuarios (username, password, nombre, email) VALUES ('escalador', 'escalar123', 'Carlos Rueda', 'carlos.rueda@escalada.local')`)
 		log.Println("Usuarios seeded")
 	}
+	DB.Exec(`UPDATE usuarios SET email = 'admin@escalada.local' WHERE username = 'admin' AND (email IS NULL OR email = '')`)
+	DB.Exec(`UPDATE usuarios SET email = 'carlos.rueda@escalada.local' WHERE username = 'escalador' AND (email IS NULL OR email = '')`)
 	DB.QueryRow("SELECT COUNT(*) FROM equipos").Scan(&count)
 	equipos := []struct{ nombre, desc, img string }{
 		{"Arnés de escalada", "Arnés de seguridad homologado para escalada en roca y muro", "https://images.pexels.com/photos/1733056/pexels-photo-1733056.jpeg?auto=compress&cs=tinysrgb&w=900&h=600&dpr=1"},

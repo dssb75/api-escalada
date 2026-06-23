@@ -15,7 +15,15 @@ DB_USER=postgres
 DB_PASSWORD=postgres
 DB_NAME=escalada
 PORT=8080
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USER=user@example.com
+SMTP_PASSWORD=your-password
+EMAIL_FROM=reservas@example.com
+EMAIL_PROVIDER=SMTP
 ```
+
+Las reservas de equipo y horario envian un correo de confirmacion al usuario con los datos de la reserva. Si no configuras SMTP, la reserva sigue guardandose pero el correo no se envia.
 
 ## Ejecutar
 ```bash
