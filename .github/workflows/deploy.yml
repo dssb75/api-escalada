@@ -1,4 +1,4 @@
-name: Deploy Full Stack
+name: Deploy Backend
 
 on:
   push:
@@ -9,15 +9,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy via SSH
+      - name: Deploy Backend
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USER }}
           key: ${{ secrets.SSH_KEY }}
           script: |
-
-            echo "=== BACKEND ==="
             cd ~/api-escalada
             git pull origin main
 
@@ -26,13 +24,3 @@ jobs:
 
             docker build -t api-escalada .
             docker run -d --name api-escalada -p 8080:8080 api-escalada
-
-            echo "=== FRONTEND ==="
-            cd ~/app-escalada
-            git pull origin main
-
-            npm install
-            npm run build
-
-            sudo rm -rf /var/www/escalada/*
-            sudo cp -r dist/* /var/www/escalada/
